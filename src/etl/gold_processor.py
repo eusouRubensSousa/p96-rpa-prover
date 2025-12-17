@@ -283,6 +283,7 @@ class GoldProcessor:
         
         # Seleciona e renomeia colunas finais - removido sk_status pois não existe coluna Status
         fato_final = pd.DataFrame({
+            'data': fato['data'],
             'sk_instituicao': fato['sk_instituicao'],
             'sk_tipo_lancamento': fato['sk_tipo_lancamento'],
             'sk_categoria': fato['sk_categoria'],
