@@ -102,15 +102,34 @@ class GoldProcessor:
         """Cria dimensão de Categoria"""
         logger.info("Criando dim_categoria...")
         
-        # Usar os nomes EXATOS das colunas do CSV (15 e 17)
-        df = self.df_silver[['Classfica\u00e7\u00e3o Categoria', 'Classfica\u00e7\u00e3o Item']].copy()
-        df.columns = ['categoria', 'item']
-        df['categoria'] = df['categoria'].fillna('Não Alocado')
-        df['item'] = df['item'].fillna('Não Alocado')
+        # Usar os nomes EXATOS das colunas do CSV (15, 16, 17, 18) - código e descrição
+        df = self.df_silver[[
+            'Classfica\u00e7\u00e3o Categoria', 
+            'Categoria',
+            'Classfica\u00e7\u00e3o Item',
+            'Item'
+        ]].copy()
+        
+        df.columns = ['codigo_categoria', 'descricao_categoria', 'codigo_item', 'descricao_item']
+        
+        # Preenche valores nulos
+        df['codigo_categoria'] = df['codigo_categoria'].fillna('NAO_ALOCADO')
+        df['descricao_categoria'] = df['descricao_categoria'].fillna('Não Alocado')
+        df['codigo_item'] = df['codigo_item'].fillna('NAO_ALOCADO')
+        df['descricao_item'] = df['descricao_item'].fillna('Não Alocado')
+        
+        # Remove duplicatas
         df = df.drop_duplicates().reset_index(drop=True)
         df['sk_categoria'] = df.index + 1
         
-        df = df[['sk_categoria', 'categoria', 'item']]
+        # Reordena colunas
+        df = df[[
+            'sk_categoria', 
+            'codigo_categoria', 
+            'descricao_categoria', 
+            'codigo_item', 
+            'descricao_item'
+        ]]
         
         logger.info(f"✓ dim_categoria: {len(df)} registros")
         return df
@@ -234,11 +253,18 @@ class GoldProcessor:
         )
         
         # dim_categoria
-        fato['categoria_temp'] = fato['Classfica\u00e7\u00e3o Categoria'].fillna('Não Alocado')
-        fato['item_temp'] = fato['Classfica\u00e7\u00e3o Item'].fillna('Não Alocado')
+        fato['codigo_categoria_temp'] = fato['Classfica\u00e7\u00e3o Categoria'].fillna('NAO_ALOCADO')
+        fato['descricao_categoria_temp'] = fato['Categoria'].fillna('Não Alocado')
+        fato['codigo_item_temp'] = fato['Classfica\u00e7\u00e3o Item'].fillna('NAO_ALOCADO')
+        fato['descricao_item_temp'] = fato['Item'].fillna('Não Alocado')
         fato = fato.merge(
-            dimensoes['dim_categoria'].rename(columns={'categoria': 'categoria_temp', 'item': 'item_temp'}),
-            on=['categoria_temp', 'item_temp'],
+            dimensoes['dim_categoria'].rename(columns={
+                'codigo_categoria': 'codigo_categoria_temp',
+                'descricao_categoria': 'descricao_categoria_temp',
+                'codigo_item': 'codigo_item_temp',
+                'descricao_item': 'descricao_item_temp'
+            }),
+            on=['codigo_categoria_temp', 'descricao_categoria_temp', 'codigo_item_temp', 'descricao_item_temp'],
             how='left'
         )
         
