@@ -3,12 +3,16 @@ Processador da Camada Gold
 Transforma dados da camada Silver em modelo dimensional (Star Schema)
 """
 
+import sys
 import pandas as pd
 import json
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Tuple
 import numpy as np
+
+# Adiciona o diretório raiz ao path para permitir execução direta
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from google.cloud import storage
 from config.settings import settings
@@ -33,26 +37,70 @@ class GoldProcessor:
         try:
             logger.info("Inicializando cliente do Google Cloud Storage...")
             
+            # Obtém project_id das configurações ou usa fallback
+            project_id = settings.gcp_project_id or "lille-422512"
+            
             credentials_path = settings.google_application_credentials
             if credentials_path and Path(credentials_path).exists():
-                self.client = storage.Client.from_service_account_json(credentials_path)
+                self.client = storage.Client.from_service_account_json(
+                    credentials_path,
+                    project=project_id
+                )
             else:
-                self.client = storage.Client()
+                # Passa o project_id explicitamente
+                self.client = storage.Client(project=project_id)
             
             self.bucket = self.client.bucket(self.bucket_name)
-            logger.info(f"Cliente inicializado - Bucket: {self.bucket_name}")
+            logger.info(f"Cliente inicializado - Bucket: {self.bucket_name}, Project: {project_id}")
             
         except Exception as e:
             raise StorageException(f"Erro ao inicializar cliente GCS: {e}")
     
     def _baixar_arquivo_silver(self) -> pd.DataFrame:
-        """Baixa o arquivo consolidado da camada Silver"""
+        """
+        Baixa o arquivo consolidado da camada Silver mais recente
+        Verifica a data de criação/modificação do arquivo para garantir que está atualizado
+        """
         logger.info("Baixando dados da camada Silver...")
+        logger.info("Verificando arquivo Silver mais recente...")
         
         silver_path = "silver/fluxo_caixa_rpa/fluxo_caixa_consolidado.parquet"
         
         try:
             blob = self.bucket.blob(silver_path)
+            
+            # Verifica se o arquivo existe
+            if not blob.exists():
+                raise StorageException(
+                    f"Arquivo Silver não encontrado: {silver_path}\n"
+                    f"Execute primeiro o processamento Bronze → Silver para gerar o arquivo."
+                )
+            
+            # Recarrega para obter metadados completos
+            blob.reload()
+            
+            # Obtém data de criação/modificação
+            data_criacao = blob.time_created or blob.updated
+            tamanho_mb = (blob.size / (1024 * 1024)) if blob.size else 0
+            
+            logger.info(f"  📄 Arquivo Silver encontrado: {Path(silver_path).name}")
+            logger.info(f"  📅 Data de criação: {data_criacao}")
+            logger.info(f"  📊 Tamanho: {tamanho_mb:.2f} MB")
+            
+            # Verifica se o arquivo está muito antigo (mais de 7 dias)
+            if data_criacao:
+                from datetime import timedelta
+                dias_desde_criacao = (datetime.now(data_criacao.tzinfo) - data_criacao).days
+                if dias_desde_criacao > 7:
+                    logger.warning(
+                        f"  ⚠ ATENÇÃO: Arquivo Silver tem {dias_desde_criacao} dias de idade!"
+                    )
+                    logger.warning(
+                        f"     Pode conter dados desatualizados. "
+                        f"Considere reprocessar Bronze → Silver para atualizar."
+                    )
+                else:
+                    logger.info(f"  ✓ Arquivo Silver está atualizado ({dias_desde_criacao} dia(s) de idade)")
             
             # Baixa o Parquet
             from io import BytesIO
@@ -64,8 +112,12 @@ class GoldProcessor:
             df = pd.read_parquet(buffer)
             
             logger.info(f"✓ Dados Silver carregados: {len(df)} linhas")
+            logger.info("")
+            
             return df
             
+        except StorageException:
+            raise
         except Exception as e:
             raise StorageException(f"Erro ao baixar arquivo Silver: {e}")
     

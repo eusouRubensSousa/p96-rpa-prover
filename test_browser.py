@@ -33,3 +33,7 @@ if __name__ == "__main__":
         logger.error(f"✗ Erro no teste: {str(e)}")
         import traceback
         traceback.print_exc()
+
+
+
+

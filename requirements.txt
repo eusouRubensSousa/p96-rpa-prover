@@ -10,7 +10,7 @@ google-cloud-bigquery==3.14.1
 google-cloud-secret-manager==2.18.0
 
 # Processamento de Dados
-pandas==2.1.4
+#pandas==2.2.2
 numpy==1.26.3
 openpyxl==3.1.2
 xlrd==2.0.1
@@ -37,6 +37,10 @@ black==23.12.1
 flake8==7.0.0
 isort==5.13.2
 mypy==1.8.0
+
+
+
+
 
 
 

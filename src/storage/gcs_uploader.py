@@ -28,7 +28,11 @@ class GCSUploader:
         try:
             self.logger.info("Inicializando cliente do Google Cloud Storage...")
             
+            # Obtém project_id das configurações ou usa fallback
+            project_id = settings.gcp_project_id or "lille-422512"
+            
             # Define as credenciais via variável de ambiente
+            credentials_path = None
             if settings.google_application_credentials:
                 credentials_path = Path(settings.google_application_credentials)
                 if credentials_path.exists():
@@ -37,15 +41,22 @@ class GCSUploader:
                 else:
                     self.logger.warning(f"Arquivo de credenciais não encontrado: {credentials_path}")
             
-            # Cria o cliente
-            self.client = storage.Client()
+            # Cria o cliente com project_id explícito
+            if credentials_path and credentials_path.exists():
+                self.client = storage.Client.from_service_account_json(
+                    str(credentials_path.absolute()),
+                    project=project_id
+                )
+            else:
+                self.client = storage.Client(project=project_id)
+            
             self.bucket = self.client.bucket(self.bucket_name)
             
             # Verifica se o bucket existe
             if not self.bucket.exists():
                 raise UploadException(f"Bucket '{self.bucket_name}' não encontrado no GCS")
             
-            self.logger.info(f"✓ Cliente GCS inicializado com sucesso. Bucket: {self.bucket_name}")
+            self.logger.info(f"✓ Cliente GCS inicializado com sucesso. Bucket: {self.bucket_name}, Project: {project_id}")
             
         except Exception as e:
             self.logger.error(f"Erro ao inicializar cliente GCS: {e}")
