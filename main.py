@@ -18,6 +18,7 @@ from src.storage.gcs_uploader import GCSUploader
 from src.etl.bronze_to_silver import BronzeToSilverProcessor
 from src.etl.silver_to_gold import SilverToGoldProcessor
 from src.database.bigquery_loader import BigQueryLoader
+from scripts.listar_arquivos_bronze import listar_arquivos_bronze
 
 
 def executar_extracao() -> dict:
@@ -67,71 +68,86 @@ def executar_upload(arquivos_por_instituicao: dict) -> dict:
     return uris_gcs
 
 
+def executar_listar_arquivos_bronze() -> None:
+    """
+    Lista arquivos da camada Bronze no GCS (mesma lógica de scripts/listar_arquivos_bronze.py).
+    Executado antes do processamento Silver para visibilidade dos dados de entrada.
+    """
+    logger = get_logger()
+    logger.info("\n" + "="*80)
+    logger.info("ETAPA 3: LISTAGEM DE ARQUIVOS BRONZE")
+    logger.info("="*80 + "\n")
+    listar_arquivos_bronze()
+    logger.info("\n" + "="*80)
+    logger.info("LISTAGEM BRONZE CONCLUÍDA")
+    logger.info("="*80 + "\n")
+
+
 def executar_processamento_bronze_silver(data: datetime = None) -> list:
     """
-    Processa dados da camada Bronze para Silver
-    
+    Processa dados da camada Bronze para Silver (mesma lógica de scripts/process_silver_layer.py).
+
     Args:
         data: Data dos arquivos a processar
-        
+
     Returns:
         Lista de URIs dos arquivos Silver
     """
     logger = get_logger()
     logger.info("\n" + "="*80)
-    logger.info("ETAPA 3: PROCESSAMENTO BRONZE → SILVER")
+    logger.info("ETAPA 4: PROCESSAMENTO BRONZE → SILVER")
     logger.info("="*80 + "\n")
-    
+
     processor = BronzeToSilverProcessor()
     silver_uris = processor.processar_todos_bronze(data)
-    
+
     logger.info("\n" + "="*80)
     logger.info("PROCESSAMENTO BRONZE → SILVER CONCLUÍDO")
     logger.info("="*80 + "\n")
-    
+
     return silver_uris
 
 
 def executar_processamento_silver_gold(data: datetime = None) -> dict:
     """
-    Processa dados da camada Silver para Gold
-    
+    Processa dados da camada Silver para Gold (mesma lógica de scripts/process_gold_layer.py).
+
     Args:
         data: Data dos arquivos a processar
-        
+
     Returns:
         Dicionário com nome da tabela e URI no GCS
     """
     logger = get_logger()
     logger.info("\n" + "="*80)
-    logger.info("ETAPA 4: PROCESSAMENTO SILVER → GOLD")
+    logger.info("ETAPA 5: PROCESSAMENTO SILVER → GOLD")
     logger.info("="*80 + "\n")
-    
+
     processor = SilverToGoldProcessor()
     gold_uris = processor.processar_silver_to_gold(data)
-    
+
     logger.info("\n" + "="*80)
     logger.info("PROCESSAMENTO SILVER → GOLD CONCLUÍDO")
     logger.info("="*80 + "\n")
-    
+
     return gold_uris
 
 
 def executar_carga_bigquery(data: datetime = None) -> None:
     """
-    Carrega dados da camada Gold para o BigQuery
-    
+    Carrega dados da camada Gold para o BigQuery (mesma lógica de scripts/load_gold_to_bigquery.py).
+
     Args:
         data: Data dos arquivos a processar
     """
     logger = get_logger()
     logger.info("\n" + "="*80)
-    logger.info("ETAPA 5: CARGA NO BIGQUERY")
+    logger.info("ETAPA 6: CARGA NO BIGQUERY")
     logger.info("="*80 + "\n")
-    
+
     loader = BigQueryLoader()
     loader.carregar_tabelas_gold(data)
-    
+
     logger.info("\n" + "="*80)
     logger.info("CARGA NO BIGQUERY CONCLUÍDA")
     logger.info("="*80 + "\n")
@@ -152,17 +168,20 @@ def executar_pipeline_completo() -> None:
     try:
         # 1. Extração
         arquivos = executar_extracao()
-        
+
         # 2. Upload para GCS (Bronze)
         uris_bronze = executar_upload(arquivos)
-        
-        # 3. Processamento Bronze → Silver
+
+        # 3. Listar arquivos Bronze (scripts/listar_arquivos_bronze.py)
+        executar_listar_arquivos_bronze()
+
+        # 4. Processamento Bronze → Silver (scripts/process_silver_layer.py)
         uris_silver = executar_processamento_bronze_silver(data_execucao)
-        
-        # 4. Processamento Silver → Gold
+
+        # 5. Processamento Silver → Gold (scripts/process_gold_layer.py)
         uris_gold = executar_processamento_silver_gold(data_execucao)
-        
-        # 5. Carga no BigQuery
+
+        # 6. Carga no BigQuery (scripts/load_gold_to_bigquery.py)
         executar_carga_bigquery(data_execucao)
         
         logger.info("\n" + "="*80)
@@ -242,8 +261,11 @@ def main():
             logger.info("Execute primeiro com --mode extract")
         
         elif args.mode == "etl":
+            # Ordem: listar_arquivos_bronze → process_silver_layer → process_gold_layer → load_gold_to_bigquery
+            executar_listar_arquivos_bronze()
             silver_uris = executar_processamento_bronze_silver(data)
             gold_uris = executar_processamento_silver_gold(data)
+            executar_carga_bigquery(data)
             logger.info(f"ETL concluído - Silver: {len(silver_uris)}, Gold: {len(gold_uris)}")
         
         elif args.mode == "bigquery":

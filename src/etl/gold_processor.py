@@ -153,36 +153,37 @@ class GoldProcessor:
     def create_dim_categoria(self) -> pd.DataFrame:
         """Cria dimensão de Categoria"""
         logger.info("Criando dim_categoria...")
-        
+
         # Usar os nomes EXATOS das colunas do CSV (15, 16, 17, 18) - código e descrição
         df = self.df_silver[[
-            'Classfica\u00e7\u00e3o Categoria', 
+            'Classfica\u00e7\u00e3o Categoria',
             'Categoria',
             'Classfica\u00e7\u00e3o Item',
             'Item'
         ]].copy()
-        
+
         df.columns = ['codigo_categoria', 'descricao_categoria', 'codigo_item', 'descricao_item']
-        
+
         # Preenche valores nulos
         df['codigo_categoria'] = df['codigo_categoria'].fillna('NAO_ALOCADO')
         df['descricao_categoria'] = df['descricao_categoria'].fillna('Não Alocado')
         df['codigo_item'] = df['codigo_item'].fillna('NAO_ALOCADO')
         df['descricao_item'] = df['descricao_item'].fillna('Não Alocado')
-        
-        # Remove duplicatas
-        df = df.drop_duplicates().reset_index(drop=True)
-        df['sk_categoria'] = df.index + 1
-        
-        # Reordena colunas
+
+        # Remove duplicatas APENAS por codigo_item, mantém primeira ocorrência
+        df = df.drop_duplicates(subset=['codigo_item'], keep='first').reset_index(drop=True)
+        # fk_categoria = código do item (chave de negócio na dimensão e na fato)
+        df['fk_categoria'] = df['codigo_item']
+
+        # Reordena colunas (fk_categoria como PK da dimensão categoria)
         df = df[[
-            'sk_categoria', 
-            'codigo_categoria', 
-            'descricao_categoria', 
-            'codigo_item', 
+            'fk_categoria',
+            'codigo_categoria',
+            'descricao_categoria',
+            'codigo_item',
             'descricao_item'
         ]]
-        
+
         logger.info(f"✓ dim_categoria: {len(df)} registros")
         return df
     
@@ -304,21 +305,8 @@ class GoldProcessor:
             how='left'
         )
         
-        # dim_categoria
-        fato['codigo_categoria_temp'] = fato['Classfica\u00e7\u00e3o Categoria'].fillna('NAO_ALOCADO')
-        fato['descricao_categoria_temp'] = fato['Categoria'].fillna('Não Alocado')
-        fato['codigo_item_temp'] = fato['Classfica\u00e7\u00e3o Item'].fillna('NAO_ALOCADO')
-        fato['descricao_item_temp'] = fato['Item'].fillna('Não Alocado')
-        fato = fato.merge(
-            dimensoes['dim_categoria'].rename(columns={
-                'codigo_categoria': 'codigo_categoria_temp',
-                'descricao_categoria': 'descricao_categoria_temp',
-                'codigo_item': 'codigo_item_temp',
-                'descricao_item': 'descricao_item_temp'
-            }),
-            on=['codigo_categoria_temp', 'descricao_categoria_temp', 'codigo_item_temp', 'descricao_item_temp'],
-            how='left'
-        )
+        # dim_categoria: fk_categoria = código do item (mesma chave na dimensão e na fato)
+        fato['fk_categoria'] = fato['Classfica\u00e7\u00e3o Item'].fillna('NAO_ALOCADO')
         
         # dim_conta
         fato['conta_temp'] = fato['Conta'].fillna('Não Informado')
@@ -359,12 +347,12 @@ class GoldProcessor:
             how='left'
         )
         
-        # Seleciona e renomeia colunas finais - removido sk_status pois não existe coluna Status
+        # Seleciona e renomeia colunas finais (fk_categoria = código do item na fato)
         fato_final = pd.DataFrame({
             'data': fato['data'],
             'sk_instituicao': fato['sk_instituicao'],
             'sk_tipo_lancamento': fato['sk_tipo_lancamento'],
-            'sk_categoria': fato['sk_categoria'],
+            'fk_categoria': fato['fk_categoria'],
             'sk_conta': fato['sk_conta'],
             'sk_centro_custo': fato['sk_centro_custo'],
             'sk_forma_pagamento': fato['sk_forma_pagamento'],
@@ -443,9 +431,9 @@ class GoldProcessor:
         if len(fato) == 0:
             raise ValueError("Tabela fato está vazia!")
         
-        # Verifica chaves nulas na fato
-        sk_columns = [col for col in fato.columns if col.startswith('sk_')]
-        for col in sk_columns:
+        # Verifica chaves nulas na fato (SKs e fk_categoria)
+        key_columns = [col for col in fato.columns if col.startswith('sk_') or col.startswith('fk_')]
+        for col in key_columns:
             nulls = fato[col].isna().sum()
             if nulls > 0:
                 logger.warning(f"⚠ {col} tem {nulls} valores nulos ({nulls/len(fato)*100:.1f}%)")

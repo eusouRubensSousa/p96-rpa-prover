@@ -359,6 +359,53 @@ class ProverScraper:
             logger.error(f"Erro ao navegar para exportação: {e}")
             raise NavigationException(f"Falha na navegação: {e}")
     
+    def _fechar_modais_overlay(self):
+        """
+        Fecha modais de overlay que possam estar bloqueando cliques (ex.: aviso de feriado,
+        horário de atendimento, modal com #imgModal). Evita 'element click intercepted'.
+        """
+        try:
+            # 1) Modal com imagem #imgModal (ex.: aviso de feriado) — clica no botão "Fechar"
+            try:
+                img_modal = self.driver.find_element(By.ID, "imgModal")
+                # Sobe até o container do modal e procura botão Fechar
+                modal_container = self.driver.execute_script(
+                    "return arguments[0].closest('.modal, [role=\"dialog\"], .modal-dialog') || arguments[0].parentElement;",
+                    img_modal
+                )
+                if modal_container:
+                    botao = modal_container.find_element(By.XPATH, ".//button[contains(text(), 'Fechar')]")
+                    self.driver.execute_script("arguments[0].click();", botao)
+                    logger.info("✓ Modal overlay (imgModal) fechado pelo botão 'Fechar'")
+                    time.sleep(1)
+                    return
+            except NoSuchElementException:
+                pass
+            except Exception as e:
+                logger.debug(f"Tentativa de fechar modal imgModal: {e}")
+            
+            # 2) Qualquer modal visível com botão "Fechar" (texto)
+            try:
+                botoes_fechar = self.driver.find_elements(
+                    By.XPATH,
+                    "//div[contains(@class, 'modal')]//button[contains(text(), 'Fechar')]"
+                )
+                for btn in botoes_fechar:
+                    if btn.is_displayed():
+                        self.driver.execute_script("arguments[0].click();", btn)
+                        logger.info("✓ Modal overlay fechado (botão Fechar)")
+                        time.sleep(1)
+                        return
+            except Exception as e:
+                logger.debug(f"Tentativa de fechar modal por botão Fechar: {e}")
+            
+            # 3) ESC para fechar modal genérico
+            from selenium.webdriver.common.action_chains import ActionChains
+            ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
+            time.sleep(0.5)
+        except Exception as e:
+            logger.debug(f"_fechar_modais_overlay: {e}")
+    
     def baixar_lancamentos_financeiros(self, instituicao: str, data_inicio: str, data_fim: str) -> List[Path]:
         """
         Baixa os lançamentos financeiros para um período
@@ -406,6 +453,9 @@ class ProverScraper:
                 logger.info("✓ Nenhum modal NPS encontrado, continuando...")
             except Exception as e:
                 logger.warning(f"⚠ Erro ao tentar fechar modal NPS: {e}. Continuando mesmo assim...")
+            
+            # Fecha qualquer modal de overlay (ex.: "Horário de atendimento durante o feriado" com imgModal)
+            self._fechar_modais_overlay()
             
             # Remove qualquer modal-backdrop que possa estar bloqueando cliques
             logger.info("Removendo modal-backdrop antes de clicar em Lançamentos Financeiros...")
@@ -529,10 +579,12 @@ class ProverScraper:
             campo_data_fim.send_keys(Keys.ENTER)
             logger.info("✓ Data fim confirmada (ENTER)")
             
-            # Clica em um local neutro para fechar o calendário
+            # Fecha modais de overlay que possam ter aparecido (ex.: aviso de feriado)
+            self._fechar_modais_overlay()
+            # Clica em um local neutro para fechar o calendário (via JS para evitar element click intercepted)
             logger.info("Clicando em local neutro para fechar o calendário...")
             label_de = self.driver.find_element(By.XPATH, "//label[contains(text(), 'De')]")
-            label_de.click()
+            self.driver.execute_script("arguments[0].click();", label_de)
             time.sleep(1)
             logger.info("✓ Foco removido dos campos de data.")
             
@@ -561,16 +613,12 @@ class ProverScraper:
     
     def _aguardar_novo_arquivo(self, arquivos_antes: set, timeout: int = 60) -> Path:
         """
-        Aguarda um novo arquivo aparecer no diretório de downloads
-        
-        Args:
-            arquivos_antes: Set com arquivos que existiam antes
-            timeout: Timeout em segundos
-            
-        Returns:
-            Path do novo arquivo
+        Aguarda um novo arquivo aparecer no diretório de downloads.
+        Ignora .crdownload e .tmp (Chrome pode renomear .tmp para o nome final).
         """
         logger.info("Aguardando novo arquivo aparecer no diretório de downloads...")
+        # Extensões consideradas "arquivo final" (não temporário)
+        extensoes_finais = (".xlsx", ".xls", ".csv", ".zip")
         
         start_time = time.time()
         novo_arquivo = None
@@ -580,33 +628,54 @@ class ProverScraper:
             arquivos_atuais = set(self.download_path.iterdir())
             novos_arquivos = arquivos_atuais - arquivos_antes
             
-            # Filtra arquivos .crdownload (ainda baixando)
-            novos_completos = [f for f in novos_arquivos if not f.name.endswith('.crdownload')]
+            # Ignora .crdownload (baixando) e .tmp (Chrome pode renomear para nome final)
+            novos_completos = [
+                f for f in novos_arquivos
+                if not f.name.endswith(".crdownload") and not f.name.endswith(".tmp")
+            ]
+            # Preferir arquivo com extensão final conhecida
+            com_ext_final = [f for f in novos_completos if f.suffix.lower() in extensoes_finais]
+            candidatos = com_ext_final if com_ext_final else novos_completos
             
-            if novos_completos:
-                novo_arquivo = novos_completos[0]
+            if candidatos:
+                novo_arquivo = candidatos[0]
                 logger.info(f"Novo arquivo detectado: '{novo_arquivo.name}'. Verificando estabilidade do download...")
                 
-                # Aguarda o tamanho do arquivo estabilizar
                 tamanho_anterior = -1
                 tentativas = 0
                 max_tentativas = 10
                 
                 while tentativas < max_tentativas:
                     time.sleep(2)
-                    tamanho_atual = novo_arquivo.stat().st_size
-                    
+                    # Arquivo pode ter sido renomeado (.tmp -> final); re-resolve pelo diretório
+                    if not novo_arquivo.exists():
+                        arquivos_agora = set(self.download_path.iterdir())
+                        novos_agora = arquivos_agora - arquivos_antes
+                        finais = [f for f in novos_agora if f.suffix.lower() in extensoes_finais and f.exists()]
+                        if finais:
+                            logger.info(f"Arquivo renomeado pelo navegador; usando '{finais[0].name}'.")
+                            return finais[0]
+                        # Ainda pode ser .tmp que sumiu e o final ainda não apareceu
+                        break
+                    try:
+                        tamanho_atual = novo_arquivo.stat().st_size
+                    except OSError:
+                        # Arquivo sumiu (renomeado) durante stat
+                        break
                     if tamanho_atual == tamanho_anterior and tamanho_atual > 0:
-                        # Arquivo estabilizou
                         logger.info(f"Arquivo '{novo_arquivo.name}' estabilizado com {tamanho_atual} bytes.")
                         return novo_arquivo
-                    
                     tamanho_anterior = tamanho_atual
                     tentativas += 1
                 
-                # Se chegou aqui, retorna o arquivo mesmo sem estabilizar completamente
                 if novo_arquivo.exists():
                     return novo_arquivo
+                # Re-scan para pegar arquivo final se .tmp foi renomeado
+                arquivos_agora = set(self.download_path.iterdir())
+                novos_agora = arquivos_agora - arquivos_antes
+                finais = [f for f in novos_agora if f.suffix.lower() in extensoes_finais and f.exists()]
+                if finais:
+                    return finais[0]
         
         raise DownloadException(f"Timeout de {timeout}s aguardando download")
     
