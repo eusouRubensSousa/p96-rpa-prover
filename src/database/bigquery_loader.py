@@ -363,6 +363,11 @@ class BigQueryLoader:
             schema=schema,
             write_disposition=write_disp,
             create_disposition=create_disp,
+            # Permite evolução de schema (ex.: adicionar fk_categoria)
+            schema_update_options=[
+                bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
+                bigquery.SchemaUpdateOption.ALLOW_FIELD_RELAXATION,
+            ],
         )
         
         # Carrega dados

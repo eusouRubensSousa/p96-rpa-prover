@@ -159,6 +159,11 @@ class BigQueryLoader:
         job_config = bigquery.LoadJobConfig(
             schema=schema,
             write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,  # Sobrescreve
+            # Permite evolução de schema (ex.: adicionar fk_categoria)
+            schema_update_options=[
+                bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
+                bigquery.SchemaUpdateOption.ALLOW_FIELD_RELAXATION,
+            ],
         )
         
         # Carrega dados

@@ -172,11 +172,14 @@ class GoldProcessor:
 
         # Remove duplicatas APENAS por codigo_item, mantém primeira ocorrência
         df = df.drop_duplicates(subset=['codigo_item'], keep='first').reset_index(drop=True)
+        # Mantém compatibilidade com o modelo dimensional (SK) e também a FK de negócio (código do item)
+        df['sk_categoria'] = df.index + 1
         # fk_categoria = código do item (chave de negócio na dimensão e na fato)
         df['fk_categoria'] = df['codigo_item']
 
-        # Reordena colunas (fk_categoria como PK da dimensão categoria)
+        # Reordena colunas
         df = df[[
+            'sk_categoria',
             'fk_categoria',
             'codigo_categoria',
             'descricao_categoria',
@@ -307,6 +310,11 @@ class GoldProcessor:
         
         # dim_categoria: fk_categoria = código do item (mesma chave na dimensão e na fato)
         fato['fk_categoria'] = fato['Classfica\u00e7\u00e3o Item'].fillna('NAO_ALOCADO')
+        fato = fato.merge(
+            dimensoes['dim_categoria'][['fk_categoria', 'sk_categoria']],
+            on='fk_categoria',
+            how='left'
+        )
         
         # dim_conta
         fato['conta_temp'] = fato['Conta'].fillna('Não Informado')
@@ -347,11 +355,12 @@ class GoldProcessor:
             how='left'
         )
         
-        # Seleciona e renomeia colunas finais (fk_categoria = código do item na fato)
+        # Seleciona e renomeia colunas finais (mantém sk_categoria e fk_categoria)
         fato_final = pd.DataFrame({
             'data': fato['data'],
             'sk_instituicao': fato['sk_instituicao'],
             'sk_tipo_lancamento': fato['sk_tipo_lancamento'],
+            'sk_categoria': fato['sk_categoria'],
             'fk_categoria': fato['fk_categoria'],
             'sk_conta': fato['sk_conta'],
             'sk_centro_custo': fato['sk_centro_custo'],
