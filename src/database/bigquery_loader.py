@@ -308,6 +308,26 @@ class BigQueryLoader:
             schema.append(bigquery.SchemaField(col, bq_type))
         
         return schema
+
+    def _garantir_schema_tabela(self, table_id: str, schema_novo: List[bigquery.SchemaField]) -> None:
+        """
+        Garante que a tabela no BigQuery contenha todos os campos do schema_novo.
+        Útil quando usamos WRITE_TRUNCATE (schema_update_options não é permitido).
+        """
+        try:
+            table = self.bq_client.get_table(table_id)
+        except NotFound:
+            return
+
+        atuais = {f.name for f in table.schema}
+        faltando = [f for f in schema_novo if f.name not in atuais]
+        if not faltando:
+            return
+
+        # BigQuery permite adicionar campos NULLABLE via update_table(schema)
+        table.schema = list(table.schema) + faltando
+        self.bq_client.update_table(table, ["schema"])
+        logger.info(f"  ✓ Schema atualizado ({len(faltando)} campo(s) adicionado(s)) em {table_id.split('.')[-1]}")
     
     def _carregar_tabela_bigquery(self, df: pd.DataFrame, nome_tabela: str):
         """Carrega DataFrame para uma tabela do BigQuery"""
@@ -363,12 +383,18 @@ class BigQueryLoader:
             schema=schema,
             write_disposition=write_disp,
             create_disposition=create_disp,
-            # Permite evolução de schema (ex.: adicionar fk_categoria)
-            schema_update_options=[
+        )
+
+        # Evolução de schema:
+        # - WRITE_APPEND permite schema_update_options
+        # - WRITE_TRUNCATE (tabela não particionada) NÃO permite schema_update_options; então atualizamos via API antes.
+        if write_disp == bigquery.WriteDisposition.WRITE_APPEND:
+            job_config.schema_update_options = [
                 bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
                 bigquery.SchemaUpdateOption.ALLOW_FIELD_RELAXATION,
-            ],
-        )
+            ]
+        elif write_disp == bigquery.WriteDisposition.WRITE_TRUNCATE:
+            self._garantir_schema_tabela(table_id, schema)
         
         # Carrega dados
         job = self.bq_client.load_table_from_dataframe(

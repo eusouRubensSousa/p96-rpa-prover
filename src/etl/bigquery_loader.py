@@ -129,6 +129,22 @@ class BigQueryLoader:
             schema.append(bigquery.SchemaField(col, bq_type))
         
         return schema
+
+    def _garantir_schema_tabela(self, table_id: str, schema_novo: List[bigquery.SchemaField]) -> None:
+        """Garante que a tabela tenha todos os campos do schema_novo (para WRITE_TRUNCATE)."""
+        try:
+            table = self.bq_client.get_table(table_id)
+        except NotFound:
+            return
+
+        atuais = {f.name for f in table.schema}
+        faltando = [f for f in schema_novo if f.name not in atuais]
+        if not faltando:
+            return
+
+        table.schema = list(table.schema) + faltando
+        self.bq_client.update_table(table, ["schema"])
+        logger.info(f"  ✓ Schema atualizado ({len(faltando)} campo(s) adicionado(s)) em {table_id.split('.')[-1]}")
     
     def _carregar_tabela_bigquery(self, df: pd.DataFrame, nome_tabela: str):
         """Carrega DataFrame para uma tabela do BigQuery"""
@@ -159,12 +175,9 @@ class BigQueryLoader:
         job_config = bigquery.LoadJobConfig(
             schema=schema,
             write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,  # Sobrescreve
-            # Permite evolução de schema (ex.: adicionar fk_categoria)
-            schema_update_options=[
-                bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
-                bigquery.SchemaUpdateOption.ALLOW_FIELD_RELAXATION,
-            ],
         )
+        # WRITE_TRUNCATE não aceita schema_update_options em tabela não particionada
+        self._garantir_schema_tabela(table_id, schema)
         
         # Carrega dados
         job = self.bq_client.load_table_from_dataframe(
