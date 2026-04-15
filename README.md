@@ -277,6 +277,8 @@ Para questões e suporte, abra uma issue no repositório.
 
 ---
 
+Cronob -l 
+
 **Status do Projeto:** 🟢 Ativo
 
 **Última Atualização:** Dezembro 2025
