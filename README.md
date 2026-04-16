@@ -283,12 +283,18 @@ Cronob -l
 
 **Última Atualização:** Dezembro 2025
 
+#DEPLOY
+conexta com a chave ssh-hey.
 
+ex:
+ssh -i "C:\Users\ipp-lille\p96-rpa-prover\ssh-key-2026-03-13 1.key" ubuntu@64.181.165.141
 
+rode na vm
+cd /home/ubuntu/prover-rpa-src && source venv/bin/activate && python main.py --mode full
 
+acompanhe os logs 
+tail -f /home/ubuntu/prover-rpa-src/logs/rpa_prover.log
 
-
-
-
-
+atualize a vm pelo o git
+com git pull
 
